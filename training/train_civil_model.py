@@ -1,3 +1,4 @@
+# Training pipeline for the browser civil-drawing AI model.
 from pathlib import Path
 import math, random, shutil
 from PIL import Image, ImageDraw
