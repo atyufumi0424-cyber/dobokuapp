@@ -1,128 +1,44 @@
 (()=>{
 const COLS=[
- {key:'solid150',label:'実線 W=15cm'},
- {key:'dash150',label:'破線 W=15cm'},
- {key:'zebra150',label:'ゼブラ線 W=15cm'},
- {key:'solid300',label:'実線 W=30cm'},
- {key:'dash300',label:'破線 W=30cm'},
- {key:'zebra300',label:'ゼブラ線 W=30cm'},
- {key:'solid450',label:'実線 W=45cm'},
- {key:'dash450',label:'破線 W=45cm'},
- {key:'zebra450',label:'ゼブラ線 W=45cm'},
- {key:'converted150',label:'文字・矢印・記号 W=15cm換算'}
+ {key:'solid150',label:'実線\nW=15cm',unit:'m'},
+ {key:'dash150',label:'破線\nW=15cm',unit:'m'},
+ {key:'zebra150',label:'ｾﾞﾌﾞﾗ線\nW=15cm',unit:'m'},
+ {key:'solid300',label:'実線\nW=30cm',unit:'m'},
+ {key:'dash300',label:'破線\nW=30cm',unit:'m'},
+ {key:'zebra300',label:'ｾﾞﾌﾞﾗ線\nW=30cm',unit:'m'},
+ {key:'solid450',label:'実線\nW=45cm',unit:'m'},
+ {key:'dash450',label:'破線\nW=45cm',unit:'m'},
+ {key:'zebra450',label:'ｾﾞﾌﾞﾗ線\nW=45cm',unit:'m'},
+ {key:'converted150',label:'文字・\n矢印・\n記号\nW=15cm\n換算',unit:'m'},
+ {key:'erase150',label:'区画線\n消去\nW=15cm\n換算',unit:'m'},
+ {key:'color',label:'路面\nカラー\n標示\n(m2)',unit:'m2'},
+ {key:'guard',label:'交通\n誘導員\n(人)',unit:'人'}
 ];
 let groups=[],lastPdfFile=null;
 const $=id=>document.getElementById(id);
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function waitPdf(){for(let i=0;i<75;i++){if(window.pdfjsLib)return window.pdfjsLib;await sleep(200)}throw new Error('PDFライブラリを読み込めません')}
 function norm(s){return String(s||'').normalize('NFKC').replace(/：/g,':').replace(/[‐‑–—−]/g,'-').replace(/ｾﾞﾌﾞﾗ/g,'ゼブラ').replace(/\s+/g,' ').trim()}
-function districtMarkers(text){
- const re=/(\d{1,2})\s*[\.．]\s*([^\n]{1,30}?町)/g,out=[];let m;
- while((m=re.exec(text)))out.push({index:m.index,no:Number(m[1]),name:norm(m[2]).replace(/\s/g,'')});
- return out;
-}
-function numericLength(ctx,after){
- const a=norm(after);
- let m=a.match(/^L\s*=\s*([0-9.]+)\s*m?\s*[×x*+]\s*([0-9.]+)\s*(?:本|個|ヶ|箇所|箇)?\s*=\s*([0-9.]+)\s*m/i);
- if(m)return Number(m[3]);
- m=a.match(/^L\s*=\s*([0-9.]+)\s*m?\s*\+\s*([0-9.]+)\s*m?\s*=\s*([0-9.]+)\s*m/i);
- if(m)return Number(m[3]);
- m=a.match(/^L\s*=\s*([0-9.]+)\s*m?\s*[×x*]\s*([0-9.]+)\s*(?:本|個|ヶ|箇所|箇)?/i);
- if(m)return Number(m[1])*Number(m[2]);
- m=a.match(/^L\s*=\s*([0-9.]+)\s*m\s*\/\s*箇所/i);
- if(m){const cm=norm(ctx).match(/[×x]\s*([0-9.]+)\s*(?:箇所|ヶ|個)/);return Number(m[1])*(cm?Number(cm[1]):1)}
- m=a.match(/^L\s*=\s*([0-9.]+)\s*m/i);
- return m?Number(m[1]):NaN;
-}
-function classify(ctx){
- const c=norm(ctx);
- if(/W\s*150\s*換算/i.test(c))return 'converted150';
- const wm=c.match(/W\s*(150|300|450)/i);if(!wm)return null;const w=wm[1];
- const zebra=/ゼブラ/.test(c)&&!/ゼブラ\s*枠|ゼブラ枠/.test(c);
- const dash=/破線/.test(c);
- if(zebra)return 'zebra'+w;
- return (dash?'dash':'solid')+w;
-}
-function itemName(ctx){
- const c=norm(ctx);
- const names=['矢印予告直進左(右)折','矢印直進左折','矢印直進右折','矢印直進','矢印右折','矢印予告左折','交差点マーク','指導停止線','横断指導線','ゼブラ枠','ゼブラ','外側線','中央線','文字','矢羽根'];
- for(const n of names)if(c.includes(n)){
-   if(n==='文字'){const q=c.match(/文字\s*[「\"]([^」\"]+)/);return q?'文字「'+q[1]+'」':'文字'}
-   return n;
- }
- return '区画線';
-}
-function parseSegment(no,name,text,pageNo){
- const t=norm(text);const rows=[];const re=/L\s*=/ig;let m;
- while((m=re.exec(t))){
-   const before=t.slice(Math.max(0,m.index-130),m.index);const after=t.slice(m.index,m.index+110);
-   const value=numericLength(before,after);if(!Number.isFinite(value)||value<=0||value>10000)continue;
-   const key=classify(before+' '+after);if(!key)continue;
-   const label=itemName(before);
-   const width=(before+' '+after).match(/W\s*(150|300|450)/i)?.[1]||'150';
-   const style=/破線/.test(before)?'破線':(/実線/.test(before)?'実線':(/換算/.test(before)?'換算':''));
-   rows.push({page:pageNo,item:label,width:Number(width),style,value,key,source:norm((before+' '+after).slice(-180))});
- }
- // Deduplicate identical annotation accidentally encountered twice in PDF text stream.
- const map=new Map();for(const r of rows){const k=[r.item,r.key,r.value,r.source.slice(-70)].join('|');if(!map.has(k))map.set(k,r)}
- const unique=[...map.values()];const totals={};COLS.forEach(c=>totals[c.key]=0);unique.forEach(r=>totals[r.key]+=r.value);
- return {no,name,page:pageNo,rows:unique,totals};
-}
-async function extractPdf(file){
- const pdfjs=await waitPdf();const buf=await file.arrayBuffer();const pdf=await pdfjs.getDocument({data:buf}).promise;const all=[];
- for(let p=1;p<=pdf.numPages;p++){
-   setState(`PDF ${p}/${pdf.numPages}ページを解析中…`,'run');
-   const page=await pdf.getPage(p),tc=await page.getTextContent();
-   const text=tc.items.map(x=>x.str).join(' ');const markers=districtMarkers(text);
-   if(!markers.length){all.push(parseSegment(p,'ページ'+p,text,p));continue}
-   for(let i=0;i<markers.length;i++){
-     const start=markers[i].index,end=i+1<markers.length?markers[i+1].index:text.length;
-     all.push(parseSegment(markers[i].no,markers[i].name,text.slice(start,end),p));
-   }
- }
- return all.filter(g=>g.rows.length||!/^ページ/.test(g.name)).sort((a,b)=>a.no-b.no);
-}
+function districtMarkers(text){const re=/(\d{1,2})\s*[\.．]\s*([^\n]{1,30}?町)/g,out=[];let m;while((m=re.exec(text)))out.push({index:m.index,no:Number(m[1]),name:norm(m[2]).replace(/\s/g,'')});return out}
+function numericLength(ctx,after){const a=norm(after);let m=a.match(/^L\s*=\s*([0-9.]+)\s*m?\s*[×x*+]\s*([0-9.]+)\s*(?:本|個|ヶ|箇所|箇)?\s*=\s*([0-9.]+)\s*m/i);if(m)return Number(m[3]);m=a.match(/^L\s*=\s*([0-9.]+)\s*m?\s*\+\s*([0-9.]+)\s*m?\s*=\s*([0-9.]+)\s*m/i);if(m)return Number(m[3]);m=a.match(/^L\s*=\s*([0-9.]+)\s*m?\s*[×x*]\s*([0-9.]+)\s*(?:本|個|ヶ|箇所|箇)?/i);if(m)return Number(m[1])*Number(m[2]);m=a.match(/^L\s*=\s*([0-9.]+)\s*m\s*\/\s*箇所/i);if(m){const cm=norm(ctx).match(/[×x]\s*([0-9.]+)\s*(?:箇所|ヶ|個)/);return Number(m[1])*(cm?Number(cm[1]):1)}m=a.match(/^L\s*=\s*([0-9.]+)\s*m/i);return m?Number(m[1]):NaN}
+function classify(ctx){const c=norm(ctx);if(/消去/.test(c))return 'erase150';if(/カラー|グリーンライン|グリーンベルト/.test(c))return 'color';if(/交通\s*誘導/.test(c))return 'guard';if(/W\s*150\s*換算/i.test(c))return 'converted150';const wm=c.match(/W\s*(150|300|450)/i);if(!wm)return null;const w=wm[1];const zebra=/ゼブラ/.test(c)&&!/ゼブラ\s*枠|ゼブラ枠/.test(c);const dash=/破線/.test(c);if(zebra)return 'zebra'+w;return (dash?'dash':'solid')+w}
+function itemName(ctx){const c=norm(ctx);const names=['矢印予告直進左(右)折','矢印直進左折','矢印直進右折','矢印直進','矢印右折','矢印予告左折','交差点マーク','指導停止線','横断指導線','ゼブラ枠','ゼブラ','外側線','中央線','文字','矢羽根','区画線消去','路面カラー標示'];for(const n of names)if(c.includes(n)){if(n==='文字'){const q=c.match(/文字\s*[「\"]([^」\"]+)/);return q?'文字「'+q[1]+'」':'文字'}return n}return '区画線'}
+function parseSegment(no,name,text,pageNo){const t=norm(text);const rows=[];const re=/L\s*=/ig;let m;while((m=re.exec(t))){const before=t.slice(Math.max(0,m.index-130),m.index),after=t.slice(m.index,m.index+110);const value=numericLength(before,after);if(!Number.isFinite(value)||value<=0||value>10000)continue;const key=classify(before+' '+after);if(!key)continue;const label=itemName(before),width=(before+' '+after).match(/W\s*(150|300|450)/i)?.[1]||'150',style=/破線/.test(before)?'破線':(/実線/.test(before)?'実線':(/換算/.test(before)?'換算':''));rows.push({page:pageNo,item:label,width:Number(width),style,value,key,source:norm((before+' '+after).slice(-180))})}const map=new Map();for(const r of rows){const k=[r.item,r.key,r.value,r.source.slice(-70)].join('|');if(!map.has(k))map.set(k,r)}const unique=[...map.values()];const totals={};COLS.forEach(c=>totals[c.key]=0);unique.forEach(r=>totals[r.key]+=r.value);return {no,name,page:pageNo,rows:unique,totals}}
+async function extractPdf(file){const pdfjs=await waitPdf(),buf=await file.arrayBuffer(),pdf=await pdfjs.getDocument({data:buf}).promise,all=[];for(let p=1;p<=pdf.numPages;p++){setState(`PDF ${p}/${pdf.numPages}ページを解析中…`,'run');const page=await pdf.getPage(p),tc=await page.getTextContent(),text=tc.items.map(x=>x.str).join(' '),markers=districtMarkers(text);if(!markers.length){all.push(parseSegment(p,'ページ'+p,text,p));continue}for(let i=0;i<markers.length;i++){const start=markers[i].index,end=i+1<markers.length?markers[i+1].index:text.length;all.push(parseSegment(markers[i].no,markers[i].name,text.slice(start,end),p))}}return all.filter(g=>g.rows.length||!/^ページ/.test(g.name)).sort((a,b)=>a.no-b.no)}
 function setState(t,k=''){const e=$('roadState');if(e){e.textContent=t;e.className='status '+k}}
-function render(){
- const body=$('roadBody'),sum=$('roadSummary');if(!body||!sum)return;
- const grand={};COLS.forEach(c=>grand[c.key]=0);groups.forEach(g=>COLS.forEach(c=>grand[c.key]+=g.totals[c.key]||0));
- sum.innerHTML=COLS.map(c=>`<div class="metric"><small>${c.label}</small><strong>${(grand[c.key]||0).toFixed(1)}m</strong></div>`).join('');
- body.innerHTML=groups.length?groups.map(g=>`<tr><td>${g.no}</td><td>${g.name}</td>${COLS.map(c=>`<td>${(g.totals[c.key]||0).toFixed(1)}</td>`).join('')}<td>${g.rows.length}</td></tr>`).join(''):'<tr><td colspan="13">まだ解析していません</td></tr>';
- $('roadExport').disabled=!groups.length;
+function render(){const body=$('roadBody'),sum=$('roadSummary');if(!body||!sum)return;const grand={};COLS.forEach(c=>grand[c.key]=0);groups.forEach(g=>COLS.forEach(c=>grand[c.key]+=g.totals[c.key]||0));sum.innerHTML=COLS.slice(0,10).map(c=>`<div class="metric"><small>${c.label.replace(/\n/g,' ')}</small><strong>${(grand[c.key]||0).toFixed(1)}${c.unit}</strong></div>`).join('');body.innerHTML=groups.length?groups.map(g=>`<tr><td>${g.no}</td><td>${g.name}</td>${COLS.map(c=>`<td>${(g.totals[c.key]||0).toFixed(1)}</td>`).join('')}<td>${g.rows.length}</td></tr>`).join(''):'<tr><td colspan="16">まだ解析していません</td></tr>';$('roadExport').disabled=!groups.length}
+function borderStyle(){return {top:{style:'thin',color:{rgb:'000000'}},bottom:{style:'thin',color:{rgb:'000000'}},left:{style:'thin',color:{rgb:'000000'}},right:{style:'thin',color:{rgb:'000000'}}}}
+function styleQuantitySheet(ws,g,rowCount){
+ ws['!merges']=[XLSX.utils.decode_range('A1:N1'),XLSX.utils.decode_range('A2:B2')];
+ ws['!cols']=[{wch:26},{wch:2},...Array(12).fill({wch:10})];
+ ws['!rows']=[{hpt:28},{hpt:24},{hpt:78},...Array(Math.max(0,rowCount-4)).fill({hpt:27}),{hpt:27}];
+ for(let r=0;r<rowCount;r++)for(let c=0;c<14;c++){const a=XLSX.utils.encode_cell({r,c}),cell=ws[a]||(ws[a]={t:'s',v:''});cell.s=cell.s||{};cell.s.font={name:'Yu Gothic',sz:r===0?16:11,bold:r===0||r===2||r===rowCount-1};cell.s.alignment={vertical:'center',horizontal:c===0?'left':'center',wrapText:true};if(r>=2)cell.s.border=borderStyle();if(r===2)cell.s.fill={fgColor:{rgb:'F2F2F2'}};if(r===rowCount-1)cell.s.fill={fgColor:{rgb:'F7F7F7'}};if(r>=3&&r<rowCount&&c>=2&&typeof cell.v==='number')cell.s.numFmt='0.0'}
+ const unit=ws['M2'];if(unit){unit.s=unit.s||{};unit.s.alignment={horizontal:'right',vertical:'center'}}
 }
-function makeSheetAOA(g){
- const head=['項目','実線\nW=15cm','破線\nW=15cm','ゼブラ線\nW=15cm','実線\nW=30cm','破線\nW=30cm','ゼブラ線\nW=30cm','実線\nW=45cm','破線\nW=45cm','ゼブラ線\nW=45cm','文字・矢印・記号\nW=15cm換算','ページ'];
- const rows=[['数量計算書'],[g.no,g.name,'','','','','','','','','','単位:m'],head];
- for(const r of g.rows){const a=Array(12).fill('');a[0]=r.item;a[1+COLS.findIndex(c=>c.key===r.key)]=r.value;a[11]=r.page;rows.push(a)}
- const sub=['小計'];COLS.forEach((c,i)=>sub[i+1]=Number((g.totals[c.key]||0).toFixed(1)));rows.push(sub);return rows;
-}
-function exportExcel(){
- if(!window.XLSX||!groups.length)return;
- const wb=XLSX.utils.book_new();
- const hdr=['No','工事箇所',...COLS.map(c=>c.label)];const summary=[['区画線 数量集計表','','単位:m'],hdr];
- const grand={};COLS.forEach(c=>grand[c.key]=0);
- groups.forEach(g=>{summary.push([g.no,g.name,...COLS.map(c=>Number((g.totals[c.key]||0).toFixed(1)))]);COLS.forEach(c=>grand[c.key]+=g.totals[c.key]||0)});
- summary.push(['','合計',...COLS.map(c=>Number((grand[c.key]||0).toFixed(1)))]);
- const ws=XLSX.utils.aoa_to_sheet(summary);ws['!cols']=[{wch:6},{wch:18},...COLS.map(()=>({wch:15}))];XLSX.utils.book_append_sheet(wb,ws,'集計表');
- for(const g of groups){const s=XLSX.utils.aoa_to_sheet(makeSheetAOA(g));s['!cols']=[{wch:24},...Array(10).fill({wch:14}),{wch:8}];XLSX.utils.book_append_sheet(wb,s,String(g.no).slice(0,31))}
- XLSX.writeFile(wb,'区画線_数量計算書.xlsx');setState('添付例に近い「集計表＋地区別数量計算書」を出力しました','ok');
-}
-async function analyze(){
- const f=$('file')?.files?.[0];if(!f)return setState('先にPDF図面を選択してください','warn');
- if(!(f.type==='application/pdf'||/\.pdf$/i.test(f.name)))return setState('このモードはまずPDF図面に対応しています','warn');
- lastPdfFile=f;$('roadRun').disabled=true;try{groups=await extractPdf(f);render();const n=groups.reduce((s,g)=>s+g.rows.length,0);setState(`完了：${groups.length}地区・${n}項目を抽出しました。内容を確認してExcel出力してください。`,'ok')}catch(e){setState('区画線解析エラー：'+(e.message||e),'err')}finally{$('roadRun').disabled=false}
-}
-function inject(){
- const host=document.querySelector('.app');if(!host)return;const sec=document.createElement('section');sec.className='card';sec.innerHTML=`
- <div class="sectionTitle">🛣️ 区画線 数量計算モード</div>
- <div class="note">CAD/PDF内の文字を直接読み取り、「中央線・外側線・ゼブラ・矢印・文字」などを W150/W300/W450・実線/破線/換算へ振り分けます。PDF全ページ対応。</div>
- <div class="row" style="margin-top:10px"><button id="roadRun" class="btn">区画線数量を解析</button><button id="roadExport" class="btn green" disabled>数量計算書Excel出力</button></div>
- <div id="roadState" class="status">PDF図面を選択して「区画線数量を解析」を押してください</div>
- <div id="roadSummary" class="results" style="margin-top:10px"></div>
- <div class="tblwrap" style="margin-top:10px"><table class="tbl" style="min-width:1500px"><thead><tr><th>No</th><th>工事箇所</th>${COLS.map(c=>`<th>${c.label}</th>`).join('')}<th>抽出項目数</th></tr></thead><tbody id="roadBody"><tr><td colspan="13">まだ解析していません</td></tr></tbody></table></div>
- <div class="note" style="margin-top:8px">※ 自動抽出後は必ず確認してください。図面の文字レイヤーが無いスキャンPDFは、今後OCR補助へ拡張できます。</div>`;
- const excelCard=[...host.querySelectorAll('.card')].find(x=>x.querySelector('#excel'));if(excelCard)host.insertBefore(sec,excelCard);else host.appendChild(sec);
- $('roadRun').onclick=analyze;$('roadExport').onclick=exportExcel;render();
-}
+function makeSheetAOA(g){const head=['項目','',...COLS.slice(0,12).map(c=>c.label)];const rows=[['数量計算書'],[`${g.no} ${g.name}`,'','','','','','','','','','','','単位：m',''],head];for(const r of g.rows){const a=Array(14).fill('');a[0]=r.item;const idx=COLS.slice(0,12).findIndex(c=>c.key===r.key);if(idx>=0)a[2+idx]=r.value;rows.push(a)}while(rows.length<27)rows.push(Array(14).fill(''));const sub=['小計',''];COLS.slice(0,12).forEach((c,i)=>sub[2+i]=Number((g.totals[c.key]||0).toFixed(1)));rows.push(sub);return rows}
+function styleSummary(ws,rowCount){ws['!merges']=[XLSX.utils.decode_range('A1:P1')];ws['!cols']=[{wch:5},{wch:20},{wch:2},...Array(13).fill({wch:11})];ws['!rows']=[{hpt:28},{hpt:78},...Array(Math.max(0,rowCount-2)).fill({hpt:28})];for(let r=0;r<rowCount;r++)for(let c=0;c<16;c++){const a=XLSX.utils.encode_cell({r,c}),cell=ws[a]||(ws[a]={t:'s',v:''});cell.s=cell.s||{};cell.s.font={name:'Yu Gothic',sz:r===0?16:10,bold:r===0||r===1||r>=rowCount-2};cell.s.alignment={vertical:'center',horizontal:c===1?'left':'center',wrapText:true};if(r>=1)cell.s.border=borderStyle();if(r===1)cell.s.fill={fgColor:{rgb:'F2F2F2'}};if(r>=2&&c>=3&&typeof cell.v==='number')cell.s.numFmt='0.0'} }
+function exportExcel(){if(!window.XLSX||!groups.length)return;const wb=XLSX.utils.book_new(),grand={};COLS.forEach(c=>grand[c.key]=0);const summary=[['区画線　数量集計表','','','','','','','','','','','','','単位：m','',''],['No','工事箇所','',...COLS.map(c=>c.label)]];groups.forEach(g=>{summary.push([g.no,g.name,'',...COLS.map(c=>Number((g.totals[c.key]||0).toFixed(1)))]);COLS.forEach(c=>grand[c.key]+=g.totals[c.key]||0)});summary.push(['','合計','',...COLS.map(c=>Number((grand[c.key]||0).toFixed(1)))]);summary.push(['','設計数量','',...COLS.map(c=>Number(Math.round((grand[c.key]||0)*10)/10))]);const ws=XLSX.utils.aoa_to_sheet(summary);styleSummary(ws,summary.length);XLSX.utils.book_append_sheet(wb,ws,'集計表');for(const g of groups){const aoa=makeSheetAOA(g),s=XLSX.utils.aoa_to_sheet(aoa);styleQuantitySheet(s,g,aoa.length);XLSX.utils.book_append_sheet(wb,s,String(g.no).slice(0,31))}XLSX.writeFile(wb,'区画線_数量計算書.xlsx',{cellStyles:true});setState('添付の数量計算書に近いレイアウトでExcelを出力しました','ok')}
+async function analyze(){const f=$('file')?.files?.[0];if(!f)return setState('先にPDF図面を選択してください','warn');if(!(f.type==='application/pdf'||/\.pdf$/i.test(f.name)))return setState('このモードはまずPDF図面に対応しています','warn');lastPdfFile=f;$('roadRun').disabled=true;try{groups=await extractPdf(f);render();const n=groups.reduce((s,g)=>s+g.rows.length,0);setState(`完了：${groups.length}地区・${n}項目を抽出しました。内容を確認してExcel出力してください。`,'ok')}catch(e){setState('区画線解析エラー：'+(e.message||e),'err')}finally{$('roadRun').disabled=false}}
+function inject(){const host=document.querySelector('.app');if(!host)return;const sec=document.createElement('section');sec.className='card';sec.innerHTML=`<div class="sectionTitle">🛣️ 区画線 数量計算モード</div><div class="note">CAD/PDF内の文字を直接読み取り、「中央線・外側線・ゼブラ・矢印・文字」などを W150/W300/W450・実線/破線/換算へ振り分けます。PDF全ページ対応。</div><div class="row" style="margin-top:10px"><button id="roadRun" class="btn">区画線数量を解析</button><button id="roadExport" class="btn green" disabled>数量計算書Excel出力</button></div><div id="roadState" class="status">PDF図面を選択して「区画線数量を解析」を押してください</div><div id="roadSummary" class="results" style="margin-top:10px"></div><div class="tblwrap" style="margin-top:10px"><table class="tbl" style="min-width:1800px"><thead><tr><th>No</th><th>工事箇所</th>${COLS.map(c=>`<th>${c.label.replace(/\n/g,'<br>')}</th>`).join('')}<th>抽出項目数</th></tr></thead><tbody id="roadBody"><tr><td colspan="16">まだ解析していません</td></tr></tbody></table></div><div class="note" style="margin-top:8px">※ 自動抽出後は必ず確認してください。図面の文字レイヤーが無いスキャンPDFはOCR補助が必要です。</div>`;const excelCard=[...host.querySelectorAll('.card')].find(x=>x.querySelector('#excel'));if(excelCard)host.insertBefore(sec,excelCard);else host.appendChild(sec);$('roadRun').onclick=analyze;$('roadExport').onclick=exportExcel;render()}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',inject);else inject();
 })();
